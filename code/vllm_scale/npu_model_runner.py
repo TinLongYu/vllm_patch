@@ -1,30 +1,20 @@
-
-import math
-from copy import copy, deepcopy
-from dataclasses import dataclass
+import os
+from copy import deepcopy
 from multiprocessing import Manager
-from typing import Any, Dict
 
-import numpy as np
 import torch
-import torch.distributed as dist
-import torch.nn as nn
-from vllm.attention.layer import Attention
 from vllm.config import CUDAGraphMode, VllmConfig
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
 from vllm.distributed.parallel_state import (get_dcp_group,
                                              get_pcp_group)
 from vllm.logger import logger
-from vllm.model_executor.model_loader import get_model
 from vllm.sequence import IntermediateTensors
 from vllm.utils.mem_utils import DeviceMemoryProfiler
 from vllm.v1.attention.selector import get_attn_backend  # type: ignore
-from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (KVCacheConfig,
                                         MambaSpec)
 from vllm.v1.sample.logits_processor import build_logitsprocs
-from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.attention.attention_v1 import AscendAttentionState
@@ -52,10 +42,8 @@ from vllm_ascend.worker.model_runner_v1 import _torch_cuda_wrapper
 from vllm.utils.torch_utils import set_default_torch_dtype
 from vllm.model_executor.model_loader.utils import initialize_model
 
-import os
 from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
-
-
+from vllm_ascend.worker.model_runner_v1 import ExecuteModelState
 
 def __init__(self, vllm_config: VllmConfig, device: torch.device):
     # TODO(qcs): These manual pad and unpad for GPUModelRunner are
