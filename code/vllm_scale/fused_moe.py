@@ -1,6 +1,41 @@
+from dataclasses import dataclass, field
+from functools import wraps
+from typing import Callable, Optional
+
+import torch
+import torch.nn.functional as F
+from vllm.config import get_current_vllm_config
+from vllm.distributed import (get_dp_group, get_ep_group, get_tp_group,
+                              tensor_model_parallel_all_reduce)
+from vllm.forward_context import get_forward_context
+from vllm.logger import logger
+from vllm.model_executor.layers.fused_moe.config import FusedMoEConfig
+from vllm.model_executor.layers.fused_moe.layer import (
+    FusedMoE, UnquantizedFusedMoEMethod, get_compressed_expert_map)
+from vllm.model_executor.layers.fused_moe.shared_fused_moe import \
+    SharedFusedMoE
+
+from vllm_ascend.ascend_config import get_ascend_config
+from vllm_ascend.ascend_forward_context import MoECommType
+from vllm_ascend.distributed.parallel_state import get_mc2_group
+from vllm_ascend.eplb.core.eplb_utils import init_eplb_config
+from vllm_ascend.flash_common3_context import (get_flash_common3_context,
+                                               set_flash_common3_context)
+from vllm_ascend.ops.fused_moe.experts_selector import (select_experts,
+                                                        zero_experts_compute)
+from vllm_ascend.ops.fused_moe.moe_comm_method import (AllGatherCommImpl,
+                                                       FusedExpertsResult,
+                                                       setup_moe_comm_method)
+from vllm_ascend.ops.fused_moe.prepare_finalize import QuantType
+from vllm_ascend.utils import (AscendDeviceType, enable_sp,
+                               get_ascend_device_type, maybe_trans_nz,
+                               npu_stream_switch, shared_expert_dp_enabled,
+                               shared_experts_calculation_stream)
 
 
-
+'''
+Patch init for scenario for redundant experts
+'''
 def __init__(self, *args, **kwargs):
     super(AscendFusedMoE, self).__init__(*args, **kwargs)
 
@@ -86,3 +121,80 @@ def __init__(self, *args, **kwargs):
 
     setup_moe_comm_method(self.moe_config)
     self.quant_type = self._get_quant_type()
+
+
+
+'''
+Need to .clone() for w13 and w2 weights to make it contiguous
+'''
+def apply(self,
+            layer: torch.nn.Module,
+            x: torch.Tensor,
+            use_grouped_topk: bool,
+            top_k: int,
+            router_logits: torch.Tensor,
+            renormalize: bool,
+            topk_group: Optional[int] = None,
+            num_expert_group: Optional[int] = None,
+            custom_routing_function: Optional[Callable] = None,
+            scoring_func: str = "softmax",
+            routed_scaling_factor: float = 1.0,
+            e_score_correction_bias: Optional[torch.Tensor] = None,
+            global_num_experts: int = -1,
+            expert_map: Optional[torch.Tensor] = None,
+            apply_router_weight_on_input: bool = False,
+            enable_force_load_balance: bool = False,
+            log2phy: torch.Tensor = None,
+            **kwargs) -> torch.Tensor:
+    zero_expert_num = getattr(layer, "zero_expert_num", 0)
+    zero_expert_type = getattr(layer, "zero_expert_type", None)
+    topk_weights, topk_ids = select_experts(
+        hidden_states=x,
+        router_logits=router_logits,
+        top_k=top_k,
+        use_grouped_topk=use_grouped_topk,
+        renormalize=renormalize,
+        topk_group=topk_group,
+        num_expert_group=num_expert_group,
+        custom_routing_function=custom_routing_function,
+        scoring_func=scoring_func,
+        routed_scaling_factor=routed_scaling_factor,
+        e_score_correction_bias=e_score_correction_bias,
+        global_num_experts=global_num_experts)
+
+    if zero_expert_num > 0 and zero_expert_type is not None:
+        topk_ids, topk_weights, zero_expert_result = zero_experts_compute(
+            expert_indices=topk_ids,
+            expert_scales=topk_weights,
+            num_experts=global_num_experts,
+            zero_expert_type=zero_expert_type,
+            hidden_states=x,
+        )
+
+    topk_weights = topk_weights.to(x.dtype)
+    # this is a naive implementation for experts load balance so as
+    # to avoid accumulating too much tokens on a single rank.
+    # currently it is only activated when doing profile runs.
+    if enable_force_load_balance:
+        random_matrix = torch.rand(topk_ids.size(0),
+                                    global_num_experts,
+                                    device=topk_ids.device)
+        topk_ids = torch.argsort(
+            random_matrix, dim=1)[:, :topk_ids.size(1)].to(topk_ids.dtype)
+
+    moe_comm_method = get_forward_context().moe_comm_method
+    final_hidden_states = moe_comm_method.fused_experts(
+        hidden_states=x,
+        w1=layer.w13_weight.clone(), ## Clone to make contiguous
+        w2=layer.w2_weight.clone(), ## Clone to make contiguous
+        topk_weights=topk_weights,
+        topk_ids=topk_ids,
+        expert_map=expert_map,
+        apply_router_weight_on_input=apply_router_weight_on_input,
+        dynamic_eplb=self.dynamic_eplb,
+        log2phy=log2phy,
+        mc2_mask=kwargs.get("mc2_mask", None))
+    if zero_expert_num > 0 and zero_expert_type is not None:
+        final_hidden_states += zero_expert_result
+    return final_hidden_states
+    

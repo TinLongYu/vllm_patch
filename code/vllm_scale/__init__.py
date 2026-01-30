@@ -2,8 +2,7 @@
 Monkey-patching elastic code
 '''
 from vllm.model_executor.model_loader.default_loader import DefaultModelLoader
-from vllm_scale.loader import load_model, zero_copy_model
-DefaultModelLoader.load_model = load_model
+from vllm_scale.loader import zero_copy_model
 DefaultModelLoader.zero_copy_model = zero_copy_model
 
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
@@ -28,12 +27,12 @@ def patch_post_init():
     AsyncMPClient.reload_kvcache_async = reload_kvcache_async
 
     from vllm.v1.engine.core import EngineCore
-    from vllm_scale.scale.core import reload_model, reload_kv_cache
+    from vllm_scale.scale.core import reload_model, reload_kvcache
     EngineCore.reload_model = reload_model
-    EngineCore.reload_kv_cache = reload_kv_cache
+    EngineCore.reload_kvcache = reload_kvcache
 
     from vllm.v1.executor.abstract import Executor
-    from vllm_scale.scale.abstract import reload_model, reload_kv_cache
+    from vllm_scale.scale.abstract import reload_model, reload_kvcache
     Executor.reload_model = reload_model
-    Executor.reload_kv_cache = reload_kv_cache
+    Executor.reload_kvcache = reload_kvcache
 
