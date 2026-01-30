@@ -46,7 +46,7 @@ from vllm_ascend.ascend_forward_context import (  # isort: skip
     set_mc2_mask, set_mc2_tokens_capacity)
 
 
-from worm_ipc.worm_client import WormNPUClient
+# from worm_ipc.worm_client import WormNPUClient
 
 from vllm_ascend.worker.model_runner_v1 import _torch_cuda_wrapper
 from vllm.utils.torch_utils import set_default_torch_dtype
