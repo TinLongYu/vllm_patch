@@ -244,7 +244,7 @@ def __init__(self, vllm_config: VllmConfig, device: torch.device):
         "device_id": self.current_device
     }
 
-    self.ipc_engine = WormNPUClient(self.ipc_config)
+    # self.ipc_engine = WormNPUClient(self.ipc_config)
 
 
 

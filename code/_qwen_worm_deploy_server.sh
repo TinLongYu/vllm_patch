@@ -7,7 +7,7 @@ cd $SCRIPT_DIR
 export HEAD_IP=$(hostname -I | awek '{print $1}')
 
 export VLLM_USE_V1=1
-export VLLM_VERSION=0.10.4
+export VLLM_VERSION=0.14.1
 export MODEL_PATH=/home/tim/models/DeepSeek-V2-Lite
 export WORLD_SIZE=16
 export MODEL_SIZE=8

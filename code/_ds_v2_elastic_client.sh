@@ -17,7 +17,7 @@ port=7101
 
 export ASCEND_RT_VISIBLE_DEVICES="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
 export VLLM_USE_V1=1
-export VLLM_VERSION=0.10.4
+export VLLM_VERSION=0.14.1
 
 export MODEL_PATH=/home/tim/models/DeepSeek-V2-Lite
 export SKIP_LOAD_FROM_DISK=""
